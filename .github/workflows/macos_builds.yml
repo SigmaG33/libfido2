@@ -1,6 +1,42 @@
 name: macos
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-osx-clang'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'src/hid_*.c'
+    - '!src/hid_osx.c'
+    - '!src/hid_unix.c'
+    - 'src/netlink.c'
+    - 'src/nfc_linux.c'
+    - 'udev/**'
+    - 'windows/**'
+  pull_request:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-osx-clang'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'src/hid_*.c'
+    - '!src/hid_osx.c'
+    - '!src/hid_unix.c'
+    - 'src/netlink.c'
+    - 'src/nfc_linux.c'
+    - 'udev/**'
+    - 'windows/**'
 
 jobs:
   build:

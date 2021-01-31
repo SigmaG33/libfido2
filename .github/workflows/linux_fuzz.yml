@@ -1,6 +1,44 @@
 name: fuzzer
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/fuzz-linux'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'examples/**'
+    - 'man/**'
+    - 'regress/**'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - 'tools/**'
+    - 'udev/**'
+    - 'windows/**'
+  pull_request:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/fuzz-linux'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'examples/**'
+    - 'man/**'
+    - 'regress/**'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - 'tools/**'
+    - 'udev/**'
+    - 'windows/**'
 
 jobs:
   build:

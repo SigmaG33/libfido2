@@ -1,6 +1,38 @@
 name: windows
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+    - '.actions/**'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'man/**'
+    - 'src/hid_*.c'
+    - '!src/hid_win.c'
+    - 'src/netlink.c'
+    - 'src/nfc_linux.c'
+    - 'udev/**'
+  pull_request:
+    paths-ignore:
+    - '.actions/**'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'man/**'
+    - 'src/hid_*.c'
+    - '!src/hid_win.c'
+    - 'src/netlink.c'
+    - 'src/nfc_linux.c'
+    - 'udev/**'
 
 jobs:
   build:

@@ -1,6 +1,38 @@
 name: linux
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-linux-*'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - '!src/hid_win.c'
+    - 'windows/**'
+  pull_request:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-linux-*'
+    - '.gitattributes'
+    - '.gitignore'
+    - 'LICENSE'
+    - 'NEWS'
+    - '**.adoc'
+    - '**.css'
+    - 'fuzz/**'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - '!src/hid_win.c'
+    - 'windows/**'
 
 jobs:
   build:

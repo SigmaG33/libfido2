@@ -1,6 +1,38 @@
 name: alpine
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-linux-*'
+    - '.gitattributes'
+    - '.gitignore'
+    - '**.adoc'
+    - '**.css'
+    - 'LICENSE'
+    - 'NEWS'
+    - 'fuzz/**'
+    - 'man/NOTES'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - 'windows/**'
+  pull_request:
+    paths-ignore:
+    - '.actions/**'
+    - '!.actions/build-linux-*'
+    - '.gitattributes'
+    - '.gitignore'
+    - '**.adoc'
+    - '**.css'
+    - 'LICENSE'
+    - 'NEWS'
+    - 'fuzz/**'
+    - 'man/NOTES'
+    - 'src/hid_*.c'
+    - '!src/hid_linux.c'
+    - '!src/hid_unix.c'
+    - 'windows/**'
 
 jobs:
   build:
