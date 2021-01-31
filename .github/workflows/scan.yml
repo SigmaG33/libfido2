@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@master
-    - name: Scan but do not fail on warnings
+    - name: scan but do not fail on warnings
       run: |
         if [ "${SECRET}" != "" ]; then
           docker login yubico-yes-docker-local.jfrog.io/ \
