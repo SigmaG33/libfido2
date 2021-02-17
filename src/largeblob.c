@@ -25,24 +25,6 @@ largeblob_new(void)
 	return calloc(1, sizeof(largeblob_t));
 }
 
-static int
-largeblob_gen_nonce(largeblob_t *blob)
-{
-	uint8_t	  buf[LARGEBLOB_NONCE_LENGTH];
-	int	  r = -1;
-
-	if (fido_get_random(buf, sizeof(buf)) < 0 ||
-	    fido_blob_set(&blob->nonce, buf, sizeof(buf)) < 0)
-		goto fail;
-
-	r = 0;
-
-fail:
-	explicit_bzero(buf, sizeof(buf));
-
-	return r;
-}
-
 static void
 largeblob_reset(largeblob_t *blob)
 {
@@ -100,6 +82,22 @@ largeblob_pt(const largeblob_t *blob, const fido_blob_t *key)
 }
 
 static int
+largeblob_get_nonce(largeblob_t *blob)
+{
+	uint8_t buf[LARGEBLOB_NONCE_LENGTH];
+	int ok = -1;
+
+	if (fido_get_random(buf, sizeof(buf)) < 0 ||
+	    fido_blob_set(&blob->nonce, buf, sizeof(buf)) < 0)
+		goto fail;
+	ok = 0;
+fail:
+	explicit_bzero(buf, sizeof(buf));
+
+	return ok;
+}
+
+static int
 largeblob_comp_enc(largeblob_t *blob, const fido_blob_t *pt,
     const fido_blob_t *key)
 {
@@ -109,7 +107,7 @@ largeblob_comp_enc(largeblob_t *blob, const fido_blob_t *pt,
 
 	if ((df = fido_blob_new()) == NULL ||
 	    (aad = largeblob_aad(pt->len)) == NULL ||
-	    largeblob_gen_nonce(blob) < 0 ||
+	    largeblob_get_nonce(blob) < 0 ||
 	    fido_compress(df, pt) != FIDO_OK ||
 	    aes256_gcm_enc(key, &blob->nonce, aad, df, &blob->ciphertext) < 0)
 		goto fail;
