@@ -210,7 +210,6 @@ int fido_dev_largeblob_put(fido_dev_t *, const unsigned char *, size_t,
     const fido_blob_t *, const char *);
 int fido_dev_largeblob_remove(fido_dev_t *, const unsigned char *, size_t,
     const char *);
-int fido_dev_largeblob_trim(fido_dev_t *, const char *);
 
 #ifdef __cplusplus
 } /* extern "C" */

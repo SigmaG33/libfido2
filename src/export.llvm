@@ -207,7 +207,6 @@ _fido_dev_supports_permissions
 _fido_dev_supports_pin
 _fido_dev_supports_uv
 _fido_dev_toggle_always_uv
-_fido_dev_largeblob_trim
 _fido_dev_largeblob_get
 _fido_dev_largeblob_put
 _fido_dev_largeblob_remove

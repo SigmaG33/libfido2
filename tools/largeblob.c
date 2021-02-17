@@ -185,30 +185,6 @@ blob_delete(const char* device_path, const char* key_path)
 int
 blob_clean(const char *device_path)
 {
-	fido_dev_t	*dev = NULL;
-	char		 pin[1024];
-	char		 prompt[1024];
-	int		 r;
-
-	dev = open_dev(device_path);
-
-	r = fido_dev_largeblob_trim(dev, NULL);
-	if (r == FIDO_ERR_PIN_REQUIRED || r == FIDO_ERR_INVALID_ARGUMENT) {
-		r = snprintf(prompt, sizeof(prompt), "Enter PIN for %s: ", device_path);
-		if (r < 0 || (size_t)r >= sizeof(prompt))
-			errx(1, "snprintf");
-		if (!readpassphrase(prompt, pin, sizeof(pin), RPP_ECHO_OFF))
-			errx(1, "readpassphrase");
-		r = fido_dev_largeblob_trim(dev, pin);
-	}
-
-	explicit_bzero(pin, sizeof(pin));
-
-	if (r != FIDO_OK)
-		errx(1, "fido_dev_largeblob_trim: %s", fido_strerr(r));
-
-	fido_dev_close(dev);
-	fido_dev_free(&dev);
-
-	exit(0);
+	(void)device_path;
+	errx(1, "unimplemented, sorry"); /* XXX fix me */
 }
