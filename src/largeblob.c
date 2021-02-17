@@ -342,8 +342,8 @@ fail:
 static int
 largeblob_do_decode(const cbor_item_t *key, const cbor_item_t *val, void *arg)
 {
-	largeblob_t	*blob = arg;
-	uint64_t	 orig_size;
+	largeblob_t *blob = arg;
+	uint64_t origsize;
 
 	if (cbor_isa_uint(key) == false ||
 	    cbor_int_get_width(key) != CBOR_INT_8) {
@@ -364,12 +364,12 @@ largeblob_do_decode(const cbor_item_t *key, const cbor_item_t *val, void *arg)
 		return 0;
 	case 3: /* origSize */
 		if (!cbor_isa_uint(val) ||
-		    (orig_size = cbor_get_int(val)) > SIZE_MAX)
+		    (origsize = cbor_get_int(val)) > SIZE_MAX)
 			return -1;
-		blob->plaintext_len = (size_t)orig_size;
+		blob->plaintext_len = (size_t)origsize;
 		return 0;
 	default: /* ignore */
-		fido_log_debug("%s: cbor value", __func__);
+		fido_log_debug("%s: cbor type", __func__);
 		return 0;
 	}
 }
@@ -377,14 +377,19 @@ largeblob_do_decode(const cbor_item_t *key, const cbor_item_t *val, void *arg)
 static int
 largeblob_decode(largeblob_t *blob, const cbor_item_t *item)
 {
-	if (!cbor_isa_map(item) || !cbor_map_is_definite(item) ||
-	    cbor_map_iter(item, blob, largeblob_do_decode) < 0)
+	if (!cbor_isa_map(item) || !cbor_map_is_definite(item)) {
+		fido_log_debug("%s: cbor type", __func__);
 		return -1;
-
+	}
+	if (cbor_map_iter(item, blob, largeblob_do_decode) < 0) {
+		fido_log_debug("%s: cbor_map_iter", __func__);
+		return -1;
+	}
 	if (fido_blob_is_empty(&blob->ciphertext) ||
-	    fido_blob_is_empty(&blob->nonce) ||
-	    blob->plaintext_len == 0)
+	    fido_blob_is_empty(&blob->nonce) || blob->plaintext_len == 0) {
+		fido_log_debug("%s: incomplete blob", __func__);
 		return -1;
+	}
 
 	return 0;
 }
