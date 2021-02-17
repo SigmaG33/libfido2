@@ -121,35 +121,6 @@ fail:
 	return ok;
 }
 
-static int
-prepare_hmac(const size_t offset, const unsigned char *data, const size_t len,
-    fido_blob_t *hmac)
-{
-	uint32_t	tmp;
-	uint8_t		buf[32 + 2 + sizeof(uint32_t) + SHA256_DIGEST_LENGTH];
-	const size_t	dgst_pos = sizeof(buf) - SHA256_DIGEST_LENGTH;
-
-	memset(buf, 0xff, 32);
-	buf[32] = CTAP_CBOR_LARGEBLOB;
-	buf[33] = 0x00;
-
-	if (offset > UINT32_MAX) {
-		fido_log_debug("%s: offset=%zu", __func__, offset);
-		return -1;
-	}
-
-	tmp = htole32((uint32_t)offset);
-	memcpy(&buf[34], &tmp, sizeof(uint32_t));
-
-	if (data == NULL || len == 0 ||
-	    SHA256(data, len, &buf[dgst_pos]) != &buf[dgst_pos]) {
-		fido_log_debug("%s: sha256", __func__);
-		return -1;
-	}
-
-	return fido_blob_set(hmac, buf, sizeof(buf));
-}
-
 static size_t
 max_fragment_length(fido_dev_t *dev)
 {
@@ -573,35 +544,49 @@ fail:
 }
 
 static int
-largeblob_array_set_tx(fido_dev_t *dev, const fido_blob_t *token,
-    const unsigned char *frag, const size_t len, const size_t offset,
-    const size_t total)
+prepare_hmac(size_t offset, const u_char *data, size_t len, fido_blob_t *hmac)
 {
-	fido_blob_t	*hmac = NULL;
-	fido_blob_t	 f;
-	cbor_item_t	*argv[6];
-	int		 r;
+	uint8_t buf[32 + 2 + sizeof(uint32_t) + SHA256_DIGEST_LENGTH];
+	uint32_t u32_offset;
+
+	if (data == NULL || len == 0 || offset > UINT32_MAX) {
+		fido_log_debug("%s: offset=%zu", __func__, offset);
+		return -1;
+	}
+	memset(buf, 0xff, 32);
+	buf[32] = CTAP_CBOR_LARGEBLOB;
+	buf[33] = 0x00;
+	u32_offset = htole32((uint32_t)offset);
+	memcpy(&buf[34], &u32_offset, sizeof(uint32_t));
+	if (SHA256(data, len, &buf[36]) != &buf[36]) {
+		fido_log_debug("%s: SHA256", __func__);
+		return -1;
+	}
+
+	return fido_blob_set(hmac, buf, sizeof(buf));
+}
+
+static int
+largeblob_set_array_tx(fido_dev_t *dev, const fido_blob_t *token,
+    const u_char *chunk, size_t chunk_len, size_t offset, size_t totalsiz)
+{
+	fido_blob_t *hmac = NULL, f;
+	cbor_item_t *argv[6];
+	int r;
 
 	memset(argv, 0, sizeof(argv));
 	memset(&f, 0, sizeof(f));
 
-	if ((argv[1] = cbor_build_bytestring(frag, len)) == NULL ||
-	    (argv[2] = cbor_build_uint(offset)) == NULL) {
-		fido_log_debug("%s: cbor_build_uint 1", __func__);
+	if ((argv[1] = cbor_build_bytestring(chunk, chunk_len)) == NULL ||
+	    (argv[2] = cbor_build_uint(offset)) == NULL ||
+	    (offset == 0 && (argv[3] = cbor_build_uint(totalsiz)) == NULL)) {
+		fido_log_debug("%s: cbor encode", __func__);
 		r = FIDO_ERR_INTERNAL;
 		goto fail;
 	}
-
-	if ((offset == 0) &&
-	    (argv[3] = cbor_build_uint(total)) == NULL) {
-		fido_log_debug("%s: cbor_build_uint 2", __func__);
-		r = FIDO_ERR_INTERNAL;
-		goto fail;
-	}
-
 	if (token != NULL) {
 		if ((hmac = fido_blob_new()) == NULL ||
-		    (prepare_hmac(offset, frag, len, hmac)) ||
+		    prepare_hmac(offset, chunk, chunk_len, hmac) < 0 ||
 		    (argv[4] = cbor_encode_pin_auth(dev, token, hmac)) == NULL ||
 		    (argv[5] = cbor_encode_pin_opt(dev)) == NULL) {
 			fido_log_debug("%s: cbor_encode_pin_auth", __func__);
@@ -609,7 +594,6 @@ largeblob_array_set_tx(fido_dev_t *dev, const fido_blob_t *token,
 			goto fail;
 		}
 	}
-
 	if (cbor_build_frame(CTAP_CBOR_LARGEBLOB, argv, nitems(argv), &f) < 0 ||
 	    fido_tx(dev, CTAP_CMD_CBOR, f.ptr, f.len) < 0) {
 		fido_log_debug("%s: fido_tx", __func__);
@@ -685,11 +669,11 @@ largeblob_array_set_wait(fido_dev_t *dev, const cbor_item_t *arr,
 			goto fail;
 		}
 
-		if ((r = largeblob_array_set_tx(dev, token,
+		if ((r = largeblob_set_array_tx(dev, token,
 		    cbor + offset, len, offset,
 		    cbor_len + LARGEBLOB_DIGEST_LENGTH)) != FIDO_OK ||
 		    (r = fido_rx_cbor_status(dev, ms)) != FIDO_OK) {
-			fido_log_debug("%s: largeblob_array_set_tx 1",
+			fido_log_debug("%s: largeblob_set_array_tx 1",
 			    __func__);
 			goto fail;
 		}
@@ -703,11 +687,11 @@ largeblob_array_set_wait(fido_dev_t *dev, const cbor_item_t *arr,
 		goto fail;
 	}
 
-	if ((r = largeblob_array_set_tx(dev, token, dgst,
+	if ((r = largeblob_set_array_tx(dev, token, dgst,
 	    LARGEBLOB_DIGEST_LENGTH, offset,
 	    cbor_len + LARGEBLOB_DIGEST_LENGTH)) != FIDO_OK ||
 	    (r = fido_rx_cbor_status(dev, ms)) != FIDO_OK) {
-		fido_log_debug("%s: largeblob_array_set_tx 2", __func__);
+		fido_log_debug("%s: largeblob_set_array_tx 2", __func__);
 		goto fail;
 	}
 
