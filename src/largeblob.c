@@ -34,30 +34,29 @@ largeblob_reset(largeblob_t *blob)
 }
 
 static void
-largeblob_free(largeblob_t **bp)
+largeblob_free(largeblob_t **blob_ptr)
 {
-	largeblob_t *b;
+	largeblob_t *blob;
 
-	if (bp == NULL || (b = *bp) == NULL)
+	if (blob_ptr == NULL || (blob = *blob_ptr) == NULL)
 		return;
-	largeblob_reset(b);
-	free(b);
-	*bp = NULL;
+	largeblob_reset(blob);
+	free(blob);
+	*blob_ptr = NULL;
 }
 
 static fido_blob_t *
-largeblob_aad(uint64_t size)
+largeblob_aad(uint64_t plaintext_len)
 {
-	uint8_t		 buf[4 + sizeof(uint64_t)];
-	fido_blob_t	*aad = NULL;
+	uint8_t buf[4 + sizeof(uint64_t)];
+	fido_blob_t *aad;
 
 	buf[0] = 0x62; /* b */
 	buf[1] = 0x6c; /* l */
 	buf[2] = 0x6f; /* o */
 	buf[3] = 0x62; /* b */
-	size = htole64(size);
-	memcpy(&buf[4], &size, sizeof(uint64_t));
-
+	plaintext_len = htole64(plaintext_len);
+	memcpy(&buf[4], &plaintext_len, sizeof(uint64_t));
 	if ((aad = fido_blob_new()) == NULL ||
 	    fido_blob_set(aad, buf, sizeof(buf)) < 0)
 		fido_blob_free(&aad);
