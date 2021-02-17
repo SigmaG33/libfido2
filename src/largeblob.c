@@ -65,19 +65,19 @@ largeblob_aad(uint64_t plaintext_len)
 }
 
 static fido_blob_t *
-largeblob_pt(const largeblob_t *blob, const fido_blob_t *key)
+largeblob_decrypt(const largeblob_t *blob, const fido_blob_t *key)
 {
-	fido_blob_t	*aad = NULL;
-	fido_blob_t	*pt = NULL;
+	fido_blob_t *plaintext, *aad = NULL;
 
-	if ((pt = fido_blob_new()) == NULL ||
+	if ((plaintext = fido_blob_new()) == NULL ||
 	    (aad = largeblob_aad(blob->plaintext_len)) == NULL ||
-	    aes256_gcm_dec(key, &blob->nonce, aad, &blob->ciphertext, pt) < 0)
-		fido_blob_free(&pt);
+	    aes256_gcm_dec(key, &blob->nonce, aad, &blob->ciphertext,
+	    plaintext) < 0)
+		fido_blob_free(&plaintext);
 
 	fido_blob_free(&aad);
 
-	return pt;
+	return plaintext;
 }
 
 static int
@@ -439,69 +439,67 @@ fail:
 }
 
 static int
-largeblob_array_find(size_t *index, fido_blob_t *out,
-    const fido_blob_t *key, const cbor_item_t *arr)
+largeblob_array_lookup(fido_blob_t *out, size_t *idx, const cbor_item_t *item,
+    const fido_blob_t *key)
 {
-	cbor_item_t	*map = NULL;
-	fido_blob_t	*pt = NULL;
-	largeblob_t	*blob = NULL;
-	int		 r = FIDO_ERR_NOTFOUND;
+	cbor_item_t **v;
+	fido_blob_t *plaintext = NULL;
+	largeblob_t blob;
+	int r;
 
+	memset(&blob, 0, sizeof(blob));
 
-	if ((blob = largeblob_new()) == NULL) {
-		fido_log_debug("%s: largeblob_new", __func__);
-		r = FIDO_ERR_INTERNAL;
-		goto fail;
-	}
-
-	for (size_t i = 0; i < cbor_array_size(arr); i++) {
-		map = cbor_array_handle(arr)[i];
-		if (largeblob_decode(blob, map) == 0 &&
-		    (pt = largeblob_pt(blob, key)) != NULL) {
-			*index = i;
-			r = FIDO_OK;
+	if ((v = cbor_array_handle(item)) == NULL)
+		return FIDO_ERR_INVALID_ARGUMENT;
+	for (size_t i = 0; i < cbor_array_size(item); i++) {
+		if (largeblob_decode(&blob, v[i]) < 0)
+			fido_log_debug("%s: largeblob_decode", __func__);
+		else if ((plaintext = largeblob_decrypt(&blob, key)) == NULL) {
+			fido_log_debug("%s: largeblob_decrypt", __func__);
+			largeblob_reset(&blob);
+		} else {
+			if (idx != NULL)
+				*idx = i;
 			break;
 		}
-
-		largeblob_reset(blob);
 	}
-
-	if (r == FIDO_OK && out != NULL &&
-	    (r = fido_uncompress(out, pt, blob->plaintext_len)) != FIDO_OK) {
-		fido_log_debug("%s: fido_uncompress", __func__);
-		goto fail;
+	if (plaintext == NULL) {
+		fido_log_debug("%s: not found", __func__);
+		return FIDO_ERR_NOTFOUND;
 	}
+	if (out != NULL)
+		r = fido_uncompress(out, plaintext, blob.plaintext_len);
+	else
+		r = FIDO_OK;
 
-fail:
-	largeblob_free(&blob);
-	fido_blob_free(&pt);
+	fido_blob_free(&plaintext);
+	largeblob_reset(&blob);
+
 	return r;
 }
 
 static int
-largeblob_array_insert(cbor_item_t **arr_p, const fido_blob_t *key,
+largeblob_array_insert(cbor_item_t **array, const fido_blob_t *key,
     cbor_item_t *blob)
 {
-	cbor_item_t	*old = *arr_p;
-	size_t		 index;
-	int		 r;
+	size_t idx;
+	int r;
 
-	r = largeblob_array_find(&index, NULL, key, old);
-
-	switch (r) {
+	switch (r = largeblob_array_lookup(NULL, &idx, *array, key)) {
 	case FIDO_OK:
-		if (!cbor_array_replace(old, index, blob)) {
+		if (!cbor_array_replace(*array, idx, blob)) {
 			r = FIDO_ERR_INTERNAL;
 			goto fail;
 		}
 		break;
 	case FIDO_ERR_NOTFOUND:
-		if (cbor_array_append(arr_p, blob) < 0) {
+		if (cbor_array_append(array, blob) < 0) {
 			r = FIDO_ERR_INTERNAL;
 			goto fail;
 		}
 		break;
 	default:
+		fido_log_debug("%s: largeblob_array_lookup", __func__);
 		goto fail;
 	}
 
@@ -511,24 +509,17 @@ fail:
 }
 
 static int
-largeblob_array_remove(cbor_item_t **arr_p, const fido_blob_t *key)
+largeblob_array_remove(cbor_item_t **array, const fido_blob_t *key)
 {
-	cbor_item_t	*arr = *arr_p;
-	size_t		 index;
-	int		 r;
+	size_t idx;
+	int r;
 
-	r = largeblob_array_find(&index, NULL, key, arr);
-	switch (r) {
-	case FIDO_OK:
-		if (cbor_array_drop(arr_p, index) < 0) {
-		    r = FIDO_ERR_INTERNAL;
-		    goto fail;
-		}
-		break;
-	case FIDO_ERR_NOTFOUND:
-		/* key not found, so let's say it's removed */
-		break;
-	default:
+	if ((r = largeblob_array_lookup(NULL, &idx, *array, key)) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_array_lookup", __func__);
+		goto fail;
+	}
+	if (cbor_array_drop(array, idx) < 0) {
+		r = FIDO_ERR_INTERNAL;
 		goto fail;
 	}
 
@@ -543,7 +534,6 @@ fido_dev_largeblob_get(fido_dev_t *dev, const unsigned char *key_ptr,
 {
 	fido_blob_t	*key = NULL;
 	cbor_item_t	*arr = NULL;
-	size_t		 index;
 	int		 r;
 
 	if (blob == NULL || key_ptr == NULL || key_len != 32) {
@@ -568,8 +558,8 @@ fido_dev_largeblob_get(fido_dev_t *dev, const unsigned char *key_ptr,
 		goto fail;
 	}
 
-	if ((r = largeblob_array_find(&index, blob, key, arr)) != FIDO_OK) {
-		fido_log_debug("%s: largeblob_array_find", __func__);
+	if ((r = largeblob_array_lookup(blob, NULL, arr, key)) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_array_lookup", __func__);
 		goto fail;
 	}
 
