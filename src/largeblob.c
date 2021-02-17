@@ -390,32 +390,28 @@ largeblob_decode(largeblob_t *blob, const cbor_item_t *item)
 }
 
 static cbor_item_t *
-largeblob_encode(const fido_blob_t *pt, const fido_blob_t *key)
+largeblob_encode(const fido_blob_t *plaintext, const fido_blob_t *key)
 {
-	largeblob_t	*blob = NULL;
-	cbor_item_t	*item = NULL;
-	cbor_item_t	*argv[3];
+	largeblob_t *blob;
+	cbor_item_t *argv[3], *item = NULL;
 
 	memset(argv, 0, sizeof(argv));
-
 	if ((blob = largeblob_new()) == NULL ||
-	    largeblob_seal(blob, pt, key) < 0) {
+	    largeblob_seal(blob, plaintext, key) < 0) {
 		fido_log_debug("%s: largeblob_seal", __func__);
 		goto fail;
 	}
-
 	if ((argv[0] = fido_blob_encode(&blob->ciphertext)) == NULL ||
 	    (argv[1] = fido_blob_encode(&blob->nonce)) == NULL ||
 	    (argv[2] = cbor_build_uint(blob->plaintext_len)) == NULL) {
-		fido_log_debug("%s: cbor", __func__);
+		fido_log_debug("%s: cbor encode", __func__);
 		goto fail;
 	}
-
 	item = cbor_flatten_vector(argv, nitems(argv));
-
 fail:
 	cbor_vector_free(argv, nitems(argv));
 	largeblob_free(&blob);
+
 	return item;
 }
 
