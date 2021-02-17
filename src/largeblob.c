@@ -148,26 +148,6 @@ max_fragment_length(fido_dev_t *dev)
 }
 
 static int
-parse_largeblob_reply(const cbor_item_t *key, const cbor_item_t *val, void *arg)
-{
-	fido_blob_t	*fragment = arg;
-
-	if (cbor_isa_uint(key) == false ||
-	    cbor_int_get_width(key) != CBOR_INT_8) {
-		fido_log_debug("%s: cbor type", __func__);
-		return 0; /* ignore */
-	}
-
-	switch (cbor_get_uint8(key)) {
-	case 1: /* substring of serialized large blob array */
-		return fido_blob_decode(val, fragment);
-	default: /* ignore */
-		fido_log_debug("%s: cbor type", __func__);
-		return 0;
-	}
-}
-
-static int
 largeblob_array_digest(const unsigned char *data, const size_t len,
     unsigned char dgst[LARGEBLOB_DIGEST_LENGTH])
 {
@@ -233,35 +213,42 @@ fail:
 }
 
 static int
-largeblob_array_get_rx(fido_dev_t *dev, fido_blob_t **frag, int ms)
+parse_largeblob_reply(const cbor_item_t *key, const cbor_item_t *val,
+    void *arg)
 {
-	unsigned char	reply[FIDO_MAXMSG];
-	int		reply_len;
-	int		r;
+	if (cbor_isa_uint(key) == false ||
+	    cbor_int_get_width(key) != CBOR_INT_8 ||
+	    cbor_get_uint8(key) != 1) {
+		fido_log_debug("%s: cbor type", __func__);
+		return 0; /* ignore */
+	}
+
+	return fido_blob_decode(val, arg);
+}
+
+static int
+largeblob_get_rx(fido_dev_t *dev, fido_blob_t **chunk, int ms)
+{
+	unsigned char reply[FIDO_MAXMSG];
+	int reply_len, r;
 
 	if ((reply_len = fido_rx(dev, CTAP_CMD_CBOR, &reply, sizeof(reply),
 	    ms)) < 0) {
 		fido_log_debug("%s: fido_rx", __func__);
-		r = FIDO_ERR_RX;
-		goto fail;
+		return FIDO_ERR_RX;
 	}
-
-	if (((*frag) = fido_blob_new()) == NULL) {
+	if ((*chunk = fido_blob_new()) == NULL) {
 		fido_log_debug("%s: fido_blob_new", __func__);
-		r = FIDO_ERR_INTERNAL;
-		goto fail;
+		return FIDO_ERR_INTERNAL;
 	}
-
-	if ((r = cbor_parse_reply(reply, (size_t)reply_len, *frag,
+	if ((r = cbor_parse_reply(reply, (size_t)reply_len, *chunk,
 	    parse_largeblob_reply)) != FIDO_OK) {
 		fido_log_debug("%s: parse_largeblob_reply", __func__);
-		goto fail;
+		fido_blob_free(chunk);
+		return r;
 	}
 
-	r = FIDO_OK;
-
-fail:
-	return r;
+	return FIDO_OK;
 }
 
 static cbor_item_t *
@@ -310,7 +297,7 @@ largeblob_array_get_wait(fido_dev_t *dev, int ms)
 		fido_blob_free(&frag);
 
 		if ((largeblob_get_tx(dev, arr->len, maxlen)) != FIDO_OK ||
-		    (largeblob_array_get_rx(dev, &frag, ms)) != FIDO_OK) {
+		    (largeblob_get_rx(dev, &frag, ms)) != FIDO_OK) {
 			fido_log_debug("%s: largeblob_array_get_{tx,rx}, offset=%zu",
 			    __func__, arr->len);
 			goto fail;
