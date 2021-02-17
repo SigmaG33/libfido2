@@ -148,40 +148,6 @@ max_fragment_length(fido_dev_t *dev)
 }
 
 static int
-largeblob_array_digest(const unsigned char *data, const size_t len,
-    unsigned char dgst[LARGEBLOB_DIGEST_LENGTH])
-{
-	unsigned char	actual_dgst[SHA256_DIGEST_LENGTH];
-
-	explicit_bzero(actual_dgst, sizeof(actual_dgst));
-	if (data == NULL || len == 0 ||
-	    SHA256(data, len, actual_dgst) != actual_dgst) {
-		fido_log_debug("%s: sha256", __func__);
-		return -1;
-	}
-
-	memcpy(dgst, actual_dgst, LARGEBLOB_DIGEST_LENGTH);
-	return 0;
-}
-
-static int
-validate_largeblob_array(const fido_blob_t *b)
-{
-	unsigned char	dgst[LARGEBLOB_DIGEST_LENGTH];
-	size_t		offset;
-
-	if (b->len <= sizeof(dgst))
-		return -1;
-
-	offset = b->len - sizeof(dgst);
-
-	if (largeblob_array_digest(b->ptr, offset, dgst))
-		return -1;
-
-	return timingsafe_bcmp(dgst, b->ptr + offset, sizeof(dgst));
-}
-
-static int
 largeblob_get_tx(fido_dev_t *dev, size_t offset, size_t count)
 {
 	fido_blob_t f;
@@ -275,53 +241,18 @@ largeblob_array_load(const uint8_t *ptr, size_t len)
 	return item;
 }
 
-static cbor_item_t *
-largeblob_array_get_wait(fido_dev_t *dev, int ms)
+static size_t
+get_chunklen(fido_dev_t *dev)
 {
-	fido_blob_t	*arr = NULL;
-	fido_blob_t	*frag = NULL;
-	cbor_item_t	*item = NULL;
-	size_t		 last;
-	size_t		 maxlen;
+	uint64_t maxchunklen;
 
-	if ((maxlen = max_fragment_length(dev)) == 0 ||
-	    (arr = fido_blob_new()) == NULL) {
-		fido_log_debug("%s: maxlen=%zu, arr=%p", __func__, maxlen,
-		    (void *)arr);
-		goto fail;
-	}
+	if ((maxchunklen = fido_dev_maxmsgsize(dev)) > SIZE_MAX)
+		maxchunklen = SIZE_MAX;
+	if (maxchunklen > FIDO_MAXMSG)
+		maxchunklen = FIDO_MAXMSG;
+	maxchunklen = maxchunklen > 64 ? maxchunklen - 64 : 0;
 
-	last = maxlen;
-
-	while (last == maxlen) {
-		fido_blob_free(&frag);
-
-		if ((largeblob_get_tx(dev, arr->len, maxlen)) != FIDO_OK ||
-		    (largeblob_get_rx(dev, &frag, ms)) != FIDO_OK) {
-			fido_log_debug("%s: largeblob_array_get_{tx,rx}, offset=%zu",
-			    __func__, arr->len);
-			goto fail;
-		}
-
-		if (!fido_blob_is_empty(frag) &&
-		    fido_blob_append(arr, frag->ptr, frag->len) < 0) {
-			fido_log_debug("%s: fido_blob_append", __func__);
-			goto fail;
-		}
-
-		last = frag->len;
-	}
-
-	if (validate_largeblob_array(arr) == 0)
-		item = largeblob_array_load(arr->ptr, arr->len);
-	else
-		item = cbor_new_definite_array(0);
-
-fail:
-	fido_blob_free(&frag);
-	fido_blob_free(&arr);
-
-	return item;
+	return (size_t)maxchunklen;
 }
 
 static int
@@ -495,46 +426,77 @@ fail:
 	return r;
 }
 
-int
-fido_dev_largeblob_get(fido_dev_t *dev, const unsigned char *key_ptr,
-    size_t key_len, fido_blob_t *blob)
+static int
+largeblob_array_digest(u_char out[LARGEBLOB_DIGEST_LENGTH], const u_char *data,
+    size_t len)
 {
-	fido_blob_t	*key = NULL;
-	cbor_item_t	*arr = NULL;
-	int		 r;
+	u_char dgst[SHA256_DIGEST_LENGTH];
 
-	if (blob == NULL || key_ptr == NULL || key_len != 32) {
-		fido_log_debug("%s: blob=%p, key_ptr=%p, key_len=%zu",
-		    __func__, (void *)blob, (const void *)key_ptr, key_len);
-		r = FIDO_ERR_INVALID_ARGUMENT;
-		goto fail;
+	if (data == NULL || len == 0 || SHA256(data, len, dgst) != dgst)
+		return -1;
+	memcpy(out, dgst, LARGEBLOB_DIGEST_LENGTH);
+
+	return 0;
+}
+
+static int
+largeblob_array_check(const fido_blob_t *array)
+{
+	u_char expected_hash[LARGEBLOB_DIGEST_LENGTH];
+	size_t body_len;
+
+	fido_log_xxd(array->ptr, array->len, __func__);
+	if (array->len < sizeof(expected_hash)) {
+		fido_log_debug("%s: len %zu", __func__, array->len);
+		return -1;
+	}
+	body_len = array->len - sizeof(expected_hash);
+	if (largeblob_array_digest(expected_hash, array->ptr, body_len) < 0) {
+		fido_log_debug("%s: largeblob_array_digest", __func__);
+		return -1;
 	}
 
-	fido_blob_reset(blob);
+	return timingsafe_bcmp(expected_hash, array->ptr + body_len,
+	    sizeof(expected_hash));
+}
 
-	if ((key = fido_blob_new()) == NULL ||
-	     fido_blob_set(key, key_ptr, key_len) < 0) {
-		fido_log_debug("%s: fido_blob_set", __func__);
+static int
+largeblob_get_array(fido_dev_t *dev, cbor_item_t **item)
+{
+	fido_blob_t *array, *chunk = NULL;
+	size_t n;
+	int r;
+
+	if ((n = get_chunklen(dev)) == 0)
+		return FIDO_ERR_INVALID_ARGUMENT;
+	if ((array = fido_blob_new()) == NULL)
+		return FIDO_ERR_INTERNAL;
+	do {
+		if ((r = largeblob_get_tx(dev, array->len, n)) != FIDO_OK ||
+		    (r = largeblob_get_rx(dev, &chunk, -1)) != FIDO_OK) {
+			fido_log_debug("%s: largeblob_get_wait %zu/%zu",
+			    __func__, array->len, n);
+			goto fail;
+		}
+		if (fido_blob_append(array, chunk->ptr, chunk->len) < 0) {
+			fido_log_debug("%s: fido_blob_append", __func__);
+			r = FIDO_ERR_INTERNAL;
+			goto fail;
+		}
+		fido_blob_free(&chunk);
+	} while (chunk->len == n);
+
+	if (largeblob_array_check(array) != 0)
+		*item = cbor_new_definite_array(0); /* per spec */
+	else
+		*item = largeblob_array_load(array->ptr, array->len);
+	if (*item == NULL)
 		r = FIDO_ERR_INTERNAL;
-		goto fail;
-	}
-
-	if ((arr = largeblob_array_get_wait(dev, -1)) == NULL) {
-		fido_log_debug("%s: largeblob_array_get_wait", __func__);
-		r = FIDO_ERR_INTERNAL;
-		goto fail;
-	}
-
-	if ((r = largeblob_array_lookup(blob, NULL, arr, key)) != FIDO_OK) {
-		fido_log_debug("%s: largeblob_array_lookup", __func__);
-		goto fail;
-	}
-
+	else
+		r = FIDO_OK;
 fail:
-	fido_blob_free(&key);
-
-	if (arr != NULL)
-		cbor_decref(&arr);
+	fido_blob_free(&array);
+	fido_blob_free(&chunk);
 
 	return r;
 }
@@ -702,10 +664,53 @@ fail:
 }
 
 int
+fido_dev_largeblob_get(fido_dev_t *dev, const unsigned char *key_ptr,
+    size_t key_len, fido_blob_t *blob)
+{
+	fido_blob_t	*key = NULL;
+	cbor_item_t	*array = NULL;
+	int		 r;
+
+	if (blob == NULL || key_ptr == NULL || key_len != 32) {
+		fido_log_debug("%s: blob=%p, key_ptr=%p, key_len=%zu",
+		    __func__, (void *)blob, (const void *)key_ptr, key_len);
+		r = FIDO_ERR_INVALID_ARGUMENT;
+		goto fail;
+	}
+
+	fido_blob_reset(blob);
+
+	if ((key = fido_blob_new()) == NULL ||
+	     fido_blob_set(key, key_ptr, key_len) < 0) {
+		fido_log_debug("%s: fido_blob_set", __func__);
+		r = FIDO_ERR_INTERNAL;
+		goto fail;
+	}
+
+	if ((r = largeblob_get_array(dev, &array)) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_get_array", __func__);
+		goto fail;
+	}
+
+	if ((r = largeblob_array_lookup(blob, NULL, array, key)) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_array_lookup", __func__);
+		goto fail;
+	}
+
+fail:
+	fido_blob_free(&key);
+
+	if (array != NULL)
+		cbor_decref(&array);
+
+	return r;
+}
+
+int
 fido_dev_largeblob_put(fido_dev_t *dev, const unsigned char *key_ptr,
     size_t key_len, const fido_blob_t *blob, const char *pin)
 {
-	cbor_item_t	*arr = NULL;
+	cbor_item_t	*array = NULL;
 	cbor_item_t	*item = NULL;
 	fido_blob_t	*key = NULL;
 	int		 r;
@@ -726,14 +731,14 @@ fido_dev_largeblob_put(fido_dev_t *dev, const unsigned char *key_ptr,
 	}
 
 	if ((item = largeblob_encode(blob, key)) == NULL ||
-	    (arr = largeblob_array_get_wait(dev, -1)) == NULL) {
-		fido_log_debug("%s: largeblob_array_get_wait", __func__);
+	    largeblob_get_array(dev, &array) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_get_array", __func__);
 		r = FIDO_ERR_INTERNAL;
 		goto fail;
 	}
 
-	if ((r = largeblob_array_insert(&arr, key, item)) != FIDO_OK ||
-	    (r = largeblob_array_set_wait(dev, arr, pin, -1)) != FIDO_OK) {
+	if ((r = largeblob_array_insert(&array, key, item)) != FIDO_OK ||
+	    (r = largeblob_array_set_wait(dev, array, pin, -1)) != FIDO_OK) {
 		fido_log_debug("%s: largeblob_array_set_wait", __func__);
 		goto fail;
 	}
@@ -741,8 +746,8 @@ fido_dev_largeblob_put(fido_dev_t *dev, const unsigned char *key_ptr,
 	r = FIDO_OK;
 fail:
 	fido_blob_free(&key);
-	if (arr != NULL)
-		cbor_decref(&arr);
+	if (array != NULL)
+		cbor_decref(&array);
 	if (item != NULL)
 		cbor_decref(&item);
 
@@ -753,7 +758,7 @@ int
 fido_dev_largeblob_remove(fido_dev_t *dev, const unsigned char *key_ptr,
     size_t key_len, const char *pin)
 {
-	cbor_item_t	*arr = NULL;
+	cbor_item_t	*array = NULL;
 	fido_blob_t	*key = NULL;
 	int		 r;
 
@@ -771,14 +776,13 @@ fido_dev_largeblob_remove(fido_dev_t *dev, const unsigned char *key_ptr,
 		goto fail;
 	}
 
-	if ((arr = largeblob_array_get_wait(dev, -1)) == NULL) {
-		fido_log_debug("%s: largeblob_array_get_wait", __func__);
-		r = FIDO_ERR_INTERNAL;
+	if ((r = largeblob_get_array(dev, &array)) != FIDO_OK) {
+		fido_log_debug("%s: largeblob_get_array", __func__);
 		goto fail;
 	}
 
-	if ((r = largeblob_array_remove(&arr, key)) != FIDO_OK ||
-	    (r = largeblob_array_set_wait(dev, arr, pin, -1)) != FIDO_OK) {
+	if ((r = largeblob_array_remove(&array, key)) != FIDO_OK ||
+	    (r = largeblob_array_set_wait(dev, array, pin, -1)) != FIDO_OK) {
 		fido_log_debug("%s: largeblob_array_set_wait", __func__);
 		goto fail;
 	}
@@ -786,8 +790,8 @@ fido_dev_largeblob_remove(fido_dev_t *dev, const unsigned char *key_ptr,
 	r = FIDO_OK;
 fail:
 	fido_blob_free(&key);
-	if (arr != NULL)
-		cbor_decref(&arr);
+	if (array != NULL)
+		cbor_decref(&array);
 
 	return r;
 }
