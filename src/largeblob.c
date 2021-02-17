@@ -97,25 +97,35 @@ fail:
 }
 
 static int
-largeblob_comp_enc(largeblob_t *blob, const fido_blob_t *pt,
+largeblob_seal(largeblob_t *blob, const fido_blob_t *plaintext,
     const fido_blob_t *key)
 {
-	fido_blob_t	*aad = NULL;
-	fido_blob_t	*df = NULL;
-	int		 ok = -1;
+	fido_blob_t *pt, *aad = NULL;
+	int ok = -1;
 
-	if ((df = fido_blob_new()) == NULL ||
-	    (aad = largeblob_aad(pt->len)) == NULL ||
-	    largeblob_get_nonce(blob) < 0 ||
-	    fido_compress(df, pt) != FIDO_OK ||
-	    aes256_gcm_enc(key, &blob->nonce, aad, df, &blob->ciphertext) < 0)
+	if ((pt = fido_blob_new()) == NULL)
+		return -1;
+	if (fido_compress(pt, plaintext) != FIDO_OK) {
+		fido_log_debug("%s: fido_compress", __func__);
 		goto fail;
-
-	blob->plaintext_len = pt->len;
+	}
+	if ((aad = largeblob_aad(plaintext->len)) == NULL) {
+		fido_log_debug("%s: largeblob_add", __func__);
+		goto fail;
+	}
+	if (largeblob_get_nonce(blob) < 0) {
+		fido_log_debug("%s: largeblob_get_nonce", __func__);
+		goto fail;
+	}
+	if (aes256_gcm_enc(key, &blob->nonce, aad, pt, &blob->ciphertext) < 0) {
+		fido_log_debug("%s: aes256_gcm_enc", __func__);
+		goto fail;
+	}
+	blob->plaintext_len = plaintext->len;
 
 	ok = 0;
 fail:
-	fido_blob_free(&df);
+	fido_blob_free(&pt);
 	fido_blob_free(&aad);
 
 	return ok;
@@ -389,8 +399,8 @@ largeblob_encode(const fido_blob_t *pt, const fido_blob_t *key)
 	memset(argv, 0, sizeof(argv));
 
 	if ((blob = largeblob_new()) == NULL ||
-	    largeblob_comp_enc(blob, pt, key) < 0) {
-		fido_log_debug("%s: largeblob_comp_enc", __func__);
+	    largeblob_seal(blob, pt, key) < 0) {
+		fido_log_debug("%s: largeblob_seal", __func__);
 		goto fail;
 	}
 
