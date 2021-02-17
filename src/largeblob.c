@@ -23,7 +23,7 @@ typedef struct largeblob {
 static largeblob_t *
 largeblob_new(void)
 {
-	return (calloc(1, sizeof(largeblob_t)));
+	return calloc(1, sizeof(largeblob_t));
 }
 
 static int
@@ -41,7 +41,7 @@ largeblob_gen_nonce(largeblob_t *blob)
 fail:
 	explicit_bzero(buf, sizeof(buf));
 
-	return (r);
+	return r;
 }
 
 static void
@@ -81,7 +81,7 @@ largeblob_aad(uint64_t size)
 	    fido_blob_set(aad, buf, sizeof(buf)) < 0)
 		fido_blob_free(&aad);
 
-	return (aad);
+	return aad;
 }
 
 static fido_blob_t *
@@ -97,7 +97,7 @@ largeblob_pt(const largeblob_t *blob, const fido_blob_t *key)
 
 	fido_blob_free(&aad);
 
-	return (pt);
+	return pt;
 }
 
 static int
@@ -122,7 +122,7 @@ fail:
 	fido_blob_free(&df);
 	fido_blob_free(&aad);
 
-	return (ok);
+	return ok;
 }
 
 static int
@@ -139,7 +139,7 @@ prepare_hmac(const size_t offset, const unsigned char *data, const size_t len,
 
 	if (offset > UINT32_MAX) {
 		fido_log_debug("%s: offset=%zu", __func__, offset);
-		return (-1);
+		return -1;
 	}
 
 	tmp = htole32((uint32_t)offset);
@@ -148,10 +148,10 @@ prepare_hmac(const size_t offset, const unsigned char *data, const size_t len,
 	if (data == NULL || len == 0 ||
 	    SHA256(data, len, &buf[dgst_pos]) != &buf[dgst_pos]) {
 		fido_log_debug("%s: sha256", __func__);
-		return (-1);
+		return -1;
 	}
 
-	return (fido_blob_set(hmac, buf, sizeof(buf)));
+	return fido_blob_set(hmac, buf, sizeof(buf));
 }
 
 static size_t
@@ -167,7 +167,7 @@ max_fragment_length(fido_dev_t *dev)
 
 	maxfraglen = maxfraglen > 64 ? maxfraglen - 64 : 0;
 
-	return ((size_t)maxfraglen);
+	return (size_t)maxfraglen;
 }
 
 static int
@@ -178,15 +178,15 @@ parse_largeblob_reply(const cbor_item_t *key, const cbor_item_t *val, void *arg)
 	if (cbor_isa_uint(key) == false ||
 	    cbor_int_get_width(key) != CBOR_INT_8) {
 		fido_log_debug("%s: cbor type", __func__);
-		return (0); /* ignore */
+		return 0; /* ignore */
 	}
 
 	switch (cbor_get_uint8(key)) {
 	case 1: /* substring of serialized large blob array */
-		return (fido_blob_decode(val, fragment));
+		return fido_blob_decode(val, fragment);
 	default: /* ignore */
 		fido_log_debug("%s: cbor type", __func__);
-		return (0);
+		return 0;
 	}
 }
 
@@ -200,11 +200,11 @@ largeblob_array_digest(const unsigned char *data, const size_t len,
 	if (data == NULL || len == 0 ||
 	    SHA256(data, len, actual_dgst) != actual_dgst) {
 		fido_log_debug("%s: sha256", __func__);
-		return (-1);
+		return -1;
 	}
 
 	memcpy(dgst, actual_dgst, LARGEBLOB_DIGEST_LENGTH);
-	return (0);
+	return 0;
 }
 
 static int
@@ -214,14 +214,14 @@ validate_largeblob_array(const fido_blob_t *b)
 	size_t		offset;
 
 	if (b->len <= sizeof(dgst))
-		return (-1);
+		return -1;
 
 	offset = b->len - sizeof(dgst);
 
 	if (largeblob_array_digest(b->ptr, offset, dgst))
-		return (-1);
+		return -1;
 
-	return (timingsafe_bcmp(dgst, b->ptr + offset, sizeof(dgst)));
+	return timingsafe_bcmp(dgst, b->ptr + offset, sizeof(dgst));
 }
 
 static int
@@ -254,7 +254,7 @@ fail:
 	cbor_vector_free(argv, nitems(argv));
 	free(f.ptr);
 
-	return (r);
+	return r;
 }
 
 static int
@@ -286,7 +286,7 @@ largeblob_array_get_rx(fido_dev_t *dev, fido_blob_t **frag, int ms)
 	r = FIDO_OK;
 
 fail:
-	return (r);
+	return r;
 }
 
 static cbor_item_t *
@@ -359,7 +359,7 @@ fail:
 	fido_blob_free(&frag);
 	fido_blob_free(&arr);
 
-	return (item);
+	return item;
 }
 
 static int
@@ -371,29 +371,29 @@ largeblob_do_decode(const cbor_item_t *key, const cbor_item_t *val, void *arg)
 	if (cbor_isa_uint(key) == false ||
 	    cbor_int_get_width(key) != CBOR_INT_8) {
 		fido_log_debug("%s: cbor type", __func__);
-		return (0); /* ignore */
+		return 0; /* ignore */
 	}
 
 	switch (cbor_get_uint8(key)) {
 	case 1: /* ciphertext */
 		if (fido_blob_decode(val, &blob->ciphertext) < 0 ||
 		    blob->ciphertext.len < LARGEBLOB_TAG_LENGTH)
-			return(-1);
-		return (0);
+			return -1;
+		return 0;
 	case 2: /* nonce */
 		if (fido_blob_decode(val, &blob->nonce) < 0 ||
 		    blob->nonce.len != LARGEBLOB_NONCE_LENGTH)
-			return(-1);
-		return (0);
+			return -1;
+		return 0;
 	case 3: /* origSize */
 		if (!cbor_isa_uint(val) ||
 		    (orig_size = cbor_get_int(val)) > SIZE_MAX)
-			return (-1);
+			return -1;
 		blob->plaintext_len = (size_t)orig_size;
-		return (0);
+		return 0;
 	default: /* ignore */
 		fido_log_debug("%s: cbor value", __func__);
-		return (0);
+		return 0;
 	}
 }
 
@@ -402,14 +402,14 @@ largeblob_decode(largeblob_t *blob, const cbor_item_t *item)
 {
 	if (!cbor_isa_map(item) || !cbor_map_is_definite(item) ||
 	    cbor_map_iter(item, blob, largeblob_do_decode) < 0)
-		return (-1);
+		return -1;
 
 	if (fido_blob_is_empty(&blob->ciphertext) ||
 	    fido_blob_is_empty(&blob->nonce) ||
 	    blob->plaintext_len == 0)
-		return (-1);
+		return -1;
 
-	return (0);
+	return 0;
 }
 
 static cbor_item_t *
@@ -439,7 +439,7 @@ largeblob_encode(const fido_blob_t *pt, const fido_blob_t *key)
 fail:
 	cbor_vector_free(argv, nitems(argv));
 	largeblob_free(&blob);
-	return (item);
+	return item;
 }
 
 static int
@@ -479,7 +479,7 @@ largeblob_array_find(size_t *index, fido_blob_t *out,
 fail:
 	largeblob_free(&blob);
 	fido_blob_free(&pt);
-	return (r);
+	return r;
 }
 
 static int
@@ -511,7 +511,7 @@ largeblob_array_insert(cbor_item_t **arr_p, const fido_blob_t *key,
 
 	r = FIDO_OK;
 fail:
-	return (r);
+	return r;
 }
 
 static int
@@ -538,7 +538,7 @@ largeblob_array_remove(cbor_item_t **arr_p, const fido_blob_t *key)
 
 	r = FIDO_OK;
 fail:
-	return (r);
+	return r;
 }
 
 int
@@ -583,7 +583,7 @@ fail:
 	if (arr != NULL)
 		cbor_decref(&arr);
 
-	return (r);
+	return r;
 }
 
 static int
@@ -637,7 +637,7 @@ fail:
 	fido_blob_free(&hmac);
 	free(f.ptr);
 
-	return (r);
+	return r;
 }
 
 static int
@@ -733,7 +733,7 @@ fail:
 	es256_pk_free(&pk);
 	free(cbor);
 
-	return (r);
+	return r;
 }
 
 int
@@ -781,7 +781,7 @@ fail:
 	if (item != NULL)
 		cbor_decref(&item);
 
-	return (r);
+	return r;
 }
 
 int
@@ -824,7 +824,7 @@ fail:
 	if (arr != NULL)
 		cbor_decref(&arr);
 
-	return (r);
+	return r;
 }
 
 static int
@@ -883,7 +883,7 @@ fail:
 	fido_credman_rp_free(&rp);
 	fido_credman_rk_free(&rk);
 
-	return (r);
+	return r;
 }
 
 static int
@@ -940,7 +940,7 @@ fail:
 		cbor_decref(&new);
 	largeblob_free(&blob);
 
-	return (r);
+	return r;
 }
 
 int
@@ -975,5 +975,5 @@ fail:
 	if (arr != NULL)
 	    cbor_decref(&arr);
 
-	return (r);
+	return r;
 }
